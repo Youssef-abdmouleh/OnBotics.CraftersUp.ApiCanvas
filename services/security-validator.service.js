@@ -23,14 +23,14 @@ class SecurityValidatorService {
     constructor() {
         // Private IP ranges to block (SSRF prevention)
         this.PRIVATE_IP_RANGES = [
-            /^10\./,
-            /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-            /^192\.168\./,
-            /^127\./,
-            /^169\.254\./,
-            /^::1$/,
-            /^fe80:/,
-            /^fc00:/,
+            /^10\./, // 10.0.0.0/8
+            /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+            /^192\.168\./, // 192.168.0.0/16
+            /^127\./, // 127.0.0.0/8 (localhost)
+            /^169\.254\./, // 169.254.0.0/16 (link-local)
+            /^::1$/, // IPv6 localhost
+            /^fe80:/, // IPv6 link-local
+            /^fc00:/, // IPv6 private
             /^fd00:/, // IPv6 private
         ];
         // Allowed protocols
@@ -48,8 +48,8 @@ class SecurityValidatorService {
      * In development mode: allows localhost and HTTP protocol
      * In production mode: enforces HTTPS and blocks localhost
      */
-    validateUrl(urlString, assetType = 'json') {
-        return __awaiter(this, void 0, void 0, function* () {
+    validateUrl(urlString_1) {
+        return __awaiter(this, arguments, void 0, function* (urlString, assetType = 'json') {
             try {
                 // Parse URL
                 const url = new url_1.URL(urlString);

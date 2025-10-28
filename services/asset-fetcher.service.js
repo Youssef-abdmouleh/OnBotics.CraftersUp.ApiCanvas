@@ -109,7 +109,7 @@ class AssetFetcherService {
                         'User-Agent': userAgent || 'CraftersUp-Canvas-Renderer/1.0',
                     },
                     redirect: 'follow',
-                    follow: 3,
+                    follow: 3, // Maximum 3 redirects
                     agent: httpsAgent, // ADD THIS LINE - Use agent for self-signed certs in dev
                 });
                 console.log(`[AssetFetcher] Received response: ${response.status} ${response.statusText} for URL: ${url}`);
@@ -168,7 +168,7 @@ class AssetFetcherService {
     fetchMultiple(urls, options) {
         return __awaiter(this, void 0, void 0, function* () {
             console.log(`[AssetFetcher] Fetching ${urls.length} assets in parallel`);
-            const promises = urls.map(({ url, type }) => __awaiter(this, void 0, void 0, function* () {
+            const promises = urls.map((_a) => __awaiter(this, [_a], void 0, function* ({ url, type }) {
                 try {
                     if (type === 'json') {
                         return yield this.fetchJson(url, options);

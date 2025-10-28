@@ -4,7 +4,7 @@
  * Generates or extracts correlation ID for request tracking
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requestIdMiddleware = void 0;
+exports.requestIdMiddleware = requestIdMiddleware;
 const uuid_1 = require("uuid");
 /**
  * Add request ID to each request for tracking
@@ -18,5 +18,4 @@ function requestIdMiddleware(req, res, next) {
     res.setHeader('x-request-id', requestId);
     next();
 }
-exports.requestIdMiddleware = requestIdMiddleware;
 //# sourceMappingURL=request-id.middleware.js.map

@@ -4,7 +4,8 @@
  * Core business logic extracted from the Angular Web Worker
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateDxfInput = exports.processDxfGlyphs = void 0;
+exports.processDxfGlyphs = processDxfGlyphs;
+exports.validateDxfInput = validateDxfInput;
 const maker = require("makerjs");
 /**
  * Process glyph models into a combined DXF model
@@ -57,7 +58,6 @@ function processDxfGlyphs(textObjects, onProgress) {
     console.log('[DxfProcessor] Processing completed successfully');
     return masterCombinedModel;
 }
-exports.processDxfGlyphs = processDxfGlyphs;
 /**
  * Validate input data
  */
@@ -77,5 +77,4 @@ function validateDxfInput(textObjects) {
     }
     return true;
 }
-exports.validateDxfInput = validateDxfInput;
 //# sourceMappingURL=dxf-processor.service.js.map

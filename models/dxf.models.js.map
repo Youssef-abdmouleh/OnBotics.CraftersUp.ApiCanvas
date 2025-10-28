@@ -1,1 +1,1 @@
-{"version":3,"file":"dxf.models.js","sourceRoot":"","sources":["dxf.models.ts"],"names":[],"mappings":";AAAA;;GAEG;;;AA2DH;;GAEG;AACH,SAAgB,eAAe,CAAC,QAAa;IAC3C,OAAO,QAAQ,IAAI,QAAQ,CAAC,OAAO,KAAK,KAAK,IAAI,QAAQ,CAAC,KAAK,CAAC;AAClE,CAAC;AAFD,0CAEC"}
+{"version":3,"file":"dxf.models.js","sourceRoot":"","sources":["dxf.models.ts"],"names":[],"mappings":";AAAA;;GAEG;;AA8DH,0CAEC;AALD;;GAEG;AACH,SAAgB,eAAe,CAAC,QAAa;IAC3C,OAAO,QAAQ,IAAI,QAAQ,CAAC,OAAO,KAAK,KAAK,IAAI,QAAQ,CAAC,KAAK,CAAC;AAClE,CAAC"}

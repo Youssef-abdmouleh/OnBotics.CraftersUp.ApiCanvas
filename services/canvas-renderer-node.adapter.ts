@@ -10,7 +10,6 @@ import * as crypto from 'crypto';
 import fetch from 'node-fetch';
 import * as https from 'https';
 import config from '../config';
-import * as opentype from 'opentype.js';
 
 // Import node-canvas and fabric properly - MUST use CommonJS for Node.js!
 const { createCanvas, loadImage, registerFont, Canvas: NodeCanvas, Image: NodeImage } = require('canvas');
@@ -360,27 +359,11 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
         console.log(`[NodeAdapter] Font cached in memory`);
       }
 
-      // Step 3: Extract font name using opentype.js (works with Buffer!)
-      const arrayBuffer = fontBuffer.buffer.slice(
-        fontBuffer.byteOffset, 
-        fontBuffer.byteOffset + fontBuffer.byteLength
-      );
-      
-      const fontData = opentype.parse(arrayBuffer);
-      console.log(`[NodeAdapter] opentype.js parsed font successfully`);
-
-      // Access font names with type safety workaround (cast to any to access all properties)
-      const names = fontData.names as any;
-      let internalName = 
-        this.getPreferredStringName(names.postScriptName) ||
-        this.getPreferredStringName(names.typographicFamily) ||
-        this.getPreferredStringName(names.preferredFamily) ||
-        this.getPreferredStringName(names.fontFamily) ||
-        this.getPreferredStringName(names.fullName) ||
-        font.designation ||
-        font.idFont;
-
-      console.log(`[NodeAdapter] Font internal name: "${internalName}"`);
+      // Step 3: CRITICAL - Use font.idFont (GUID) as family name for multi-tenant support
+      // The font.idFont is the GUID that matches the fontFamily in Fabric JSON
+      // This ensures each tenant's fonts are isolated and correctly applied
+      const fontFamilyName = font.idFont; // Use GUID as family name
+      console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}"`);
 
       // Step 4: Write to temp file ONLY for node-canvas registration
       // (Unfortunately unavoidable - node-canvas requires file path)
@@ -397,15 +380,16 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
         console.log(`[NodeAdapter] Temp file already exists: ${tempPath}`);
       }
 
-      // Step 5: Register with node-canvas (requires file path)
-      registerFont(tempPath, { family: internalName });
+      // Step 5: Register with node-canvas using font.idFont (GUID) as family name
+      // This is the KEY FIX: Use the GUID instead of internal font name
+      registerFont(tempPath, { family: fontFamilyName });
 
       // Step 6: Verify font is registered and available
-      await this.verifyFontRegistration(internalName, tempPath);
+      await this.verifyFontRegistration(fontFamilyName, tempPath);
 
       // Cache the path for reuse
       this.fontPathCache.set(font.idFont, tempPath);
-      console.log(`[NodeAdapter] Font ${font.idFont} registered as "${internalName}"`);
+      console.log(`[NodeAdapter] Font ${font.idFont} registered successfully as "${fontFamilyName}"`);
 
     } catch (error: any) {
       console.error(`[NodeAdapter] Failed to load font ${font.idFont}:`, error.message);
@@ -450,18 +434,6 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
     }
   }
 
-  /**
-   * Helper to get preferred string name from opentype.js name field
-   */
-  private getPreferredStringName(nameField: any): string | undefined {
-    if (nameField && typeof nameField === 'object' && nameField.en && typeof nameField.en === 'string' && nameField.en.trim() !== '') {
-      return nameField.en.trim();
-    }
-    if (nameField && typeof nameField === 'string' && nameField.trim() !== '') {
-      return nameField.trim();
-    }
-    return undefined;
-  }
 
   /**
    * Load image from URL for node-canvas

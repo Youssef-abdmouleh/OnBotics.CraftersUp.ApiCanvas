@@ -21,7 +21,6 @@ const crypto = require("crypto");
 const node_fetch_1 = require("node-fetch");
 const https = require("https");
 const config_1 = require("../config");
-const opentype = require("opentype.js");
 // Import node-canvas and fabric properly - MUST use CommonJS for Node.js!
 const { createCanvas, loadImage, registerFont, Canvas: NodeCanvas, Image: NodeImage } = require('canvas');
 const fabric = require('fabric').fabric;
@@ -104,7 +103,7 @@ class CanvasRendererNodeAdapter {
             // Otherwise, it's a remote URL - fetch it
             console.log('[NodeAdapter] Detected remote URL, fetching...');
             (0, node_fetch_1.default)(url, {
-                timeout: 15000,
+                timeout: 15000, // Increase timeout for images
                 headers: { 'User-Agent': 'CraftersUp-Canvas-Renderer/1.0' },
                 agent: httpsAgent,
             })
@@ -272,8 +271,8 @@ class CanvasRendererNodeAdapter {
      * Keeps font in memory, writes to disk only when needed for registration
      */
     loadFont(font) {
-        var _a;
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
                 console.log(`[NodeAdapter] Loading font: ${font.designation} (${font.idFont})`);
                 // Check if already registered
@@ -305,20 +304,11 @@ class CanvasRendererNodeAdapter {
                     this.fontBufferCache.set(font.idFont, fontBuffer);
                     console.log(`[NodeAdapter] Font cached in memory`);
                 }
-                // Step 3: Extract font name using opentype.js (works with Buffer!)
-                const arrayBuffer = fontBuffer.buffer.slice(fontBuffer.byteOffset, fontBuffer.byteOffset + fontBuffer.byteLength);
-                const fontData = opentype.parse(arrayBuffer);
-                console.log(`[NodeAdapter] opentype.js parsed font successfully`);
-                // Access font names with type safety workaround (cast to any to access all properties)
-                const names = fontData.names;
-                let internalName = this.getPreferredStringName(names.postScriptName) ||
-                    this.getPreferredStringName(names.typographicFamily) ||
-                    this.getPreferredStringName(names.preferredFamily) ||
-                    this.getPreferredStringName(names.fontFamily) ||
-                    this.getPreferredStringName(names.fullName) ||
-                    font.designation ||
-                    font.idFont;
-                console.log(`[NodeAdapter] Font internal name: "${internalName}"`);
+                // Step 3: CRITICAL - Use font.idFont (GUID) as family name for multi-tenant support
+                // The font.idFont is the GUID that matches the fontFamily in Fabric JSON
+                // This ensures each tenant's fonts are isolated and correctly applied
+                const fontFamilyName = font.idFont; // Use GUID as family name
+                console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}"`);
                 // Step 4: Write to temp file ONLY for node-canvas registration
                 // (Unfortunately unavoidable - node-canvas requires file path)
                 const fontHash = crypto.createHash('md5').update(font.idFont).digest('hex').substring(0, 8);
@@ -333,13 +323,14 @@ class CanvasRendererNodeAdapter {
                 else {
                     console.log(`[NodeAdapter] Temp file already exists: ${tempPath}`);
                 }
-                // Step 5: Register with node-canvas (requires file path)
-                registerFont(tempPath, { family: internalName });
+                // Step 5: Register with node-canvas using font.idFont (GUID) as family name
+                // This is the KEY FIX: Use the GUID instead of internal font name
+                registerFont(tempPath, { family: fontFamilyName });
                 // Step 6: Verify font is registered and available
-                yield this.verifyFontRegistration(internalName, tempPath);
+                yield this.verifyFontRegistration(fontFamilyName, tempPath);
                 // Cache the path for reuse
                 this.fontPathCache.set(font.idFont, tempPath);
-                console.log(`[NodeAdapter] Font ${font.idFont} registered as "${internalName}"`);
+                console.log(`[NodeAdapter] Font ${font.idFont} registered successfully as "${fontFamilyName}"`);
             }
             catch (error) {
                 console.error(`[NodeAdapter] Failed to load font ${font.idFont}:`, error.message);
@@ -349,8 +340,8 @@ class CanvasRendererNodeAdapter {
     /**
      * Verify font is registered and available in node-canvas
      */
-    verifyFontRegistration(fontFamily, fontPath, maxRetries = 3) {
-        return __awaiter(this, void 0, void 0, function* () {
+    verifyFontRegistration(fontFamily_1, fontPath_1) {
+        return __awaiter(this, arguments, void 0, function* (fontFamily, fontPath, maxRetries = 3) {
             console.log(`[NodeAdapter] Verifying font registration: "${fontFamily}"`);
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
@@ -377,18 +368,6 @@ class CanvasRendererNodeAdapter {
                 }
             }
         });
-    }
-    /**
-     * Helper to get preferred string name from opentype.js name field
-     */
-    getPreferredStringName(nameField) {
-        if (nameField && typeof nameField === 'object' && nameField.en && typeof nameField.en === 'string' && nameField.en.trim() !== '') {
-            return nameField.en.trim();
-        }
-        if (nameField && typeof nameField === 'string' && nameField.trim() !== '') {
-            return nameField.trim();
-        }
-        return undefined;
     }
     /**
      * Load image from URL for node-canvas
