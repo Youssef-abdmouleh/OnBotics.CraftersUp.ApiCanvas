@@ -242,12 +242,10 @@ class CanvasRendererCore {
                             // STEP 2: Wait for all regular image objects to load
                             console.log(`[CanvasRendererCore] Canvas has ${canvas.getObjects().length} objects`);
                             yield this.waitForAllImagesToLoad(canvas);
-                            console.log('[CanvasRendererCore] All images loaded');
                             // STEP 3: Final render
                             canvas.renderAll();
                             console.log('[CanvasRendererCore] Canvas fully loaded and rendered');
                             resolve();
-                            console.log(`[CanvasRendererCore] Final object count: ${canvas.getObjects().length}`);
                         }
                         catch (renderError) {
                             console.error('[CanvasRendererCore] Error during post-load:', renderError);
@@ -304,7 +302,7 @@ class CanvasRendererCore {
      */
     render(options) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`[CanvasRendererCore] Starting render in ${options.environment} environment`);
+            console.log(`[CanvasRendererCore Ts] Starting render in ${options.environment} environment`);
             const startTime = Date.now();
             try {
                 // Step 1: Parse design JSON

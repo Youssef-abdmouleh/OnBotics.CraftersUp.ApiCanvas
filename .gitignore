@@ -57,3 +57,6 @@ src/assets/primeng/themes/mdc-light-indigo/*.min.css
 src/assets/fonts/*min.css
 
 src/assets/metronic/themes/default/css/skins/**/*.min.css
+
+#storage files
+storage/**/*

@@ -1,8 +1,8 @@
 "use strict";
 /**
- * Node.js Environment Adapter for Canvas Rendering - VERSION AMELIOREE
- * Utilise le FontManager pour le chargement dynamique des polices
- * PAS BESOIN D'INSTALLER LES POLICES DANS WINDOWS SERVER!
+ * Node.js Environment Adapter for Canvas Rendering
+ * Handles server-side operations: node-canvas, font registration, file system access
+ * FIXED: Now uses fabric 5.3.0 with proper initialization
  */
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -15,94 +15,124 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CanvasRendererNodeAdapter = void 0;
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const node_fetch_1 = require("node-fetch");
 const https = require("https");
 const config_1 = require("../config");
-const font_manager_1 = require("./font-manager");
-// Import node-canvas et fabric
-const { createCanvas, loadImage, Image: NodeImage } = require('canvas');
+const opentype = require("opentype.js");
+// Import node-canvas and fabric properly - MUST use CommonJS for Node.js!
+const { createCanvas, loadImage, registerFont, Canvas: NodeCanvas, Image: NodeImage } = require('canvas');
 const fabric = require('fabric').fabric;
-// Agent HTTPS pour développement
+// Create HTTPS agent for development (accepts self-signed certs)
 const httpsAgent = config_1.default.environment === 'development'
     ? new https.Agent({ rejectUnauthorized: false })
     : undefined;
 /**
- * Node.js Canvas Rendering Adapter - VERSION AMELIOREE
- * Utilise FontManager pour le chargement dynamique des polices
+ * Node.js Canvas Rendering Adapter
+ * Uses node-canvas for headless rendering
  */
 class CanvasRendererNodeAdapter {
-    constructor(fontManager) {
+    constructor(tempDir = '/tmp/canvas-fonts') {
         this.fabricCanvas = null;
+        this.fontBufferCache = new Map(); // Memory cache for font buffers
+        this.fontPathCache = new Map(); // File path cache for registered fonts
         this.fabricPatchesApplied = false;
-        // Utiliser le gestionnaire de polices fourni ou le singleton global
-        this.fontManager = fontManager || font_manager_1.globalFontManager;
-        console.log('[NodeAdapter] Initialisé avec FontManager (chargement dynamique des polices)');
-        console.log('[NodeAdapter] ✓ Aucune installation système requise!');
+        this.tempFontDir = tempDir;
+        // Ensure temp directory exists
+        if (!fs.existsSync(this.tempFontDir)) {
+            fs.mkdirSync(this.tempFontDir, { recursive: true });
+            console.log(`[NodeAdapter] Created temp font directory: ${this.tempFontDir}`);
+        }
+        console.log('[NodeAdapter] Initialized with memory-first font caching');
     }
     /**
-     * Apply Fabric.js patches for Node.js environment
+     * Apply Fabric.js patches for Node.js environment (similar to ExpressApp1)
      */
     applyFabricNodePatches() {
         if (this.fabricPatchesApplied)
             return;
-        console.log('[NodeAdapter] Application des patches Fabric.js...');
-        // Patch fabric.util.loadImage pour gérer data URLs et URLs distantes
+        console.log('[NodeAdapter] Applying Fabric.js Node.js patches...');
+        console.log('[NodeAdapter] Fabric available:', typeof fabric !== 'undefined');
+        console.log('[NodeAdapter] Fabric.StaticCanvas available:', typeof (fabric === null || fabric === void 0 ? void 0 : fabric.StaticCanvas) !== 'undefined');
+        // Patch fabric.util.loadImage to handle both data URLs and remote URLs
         fabric.util.loadImage = function (url, callback, context) {
+            console.log(`[NodeAdapter] fabric.util.loadImage called`);
+            console.log(`[NodeAdapter] URL type: ${url === null || url === void 0 ? void 0 : url.substring(0, 30)}...`);
             if (!url) {
-                console.warn('[NodeAdapter] loadImage appelé avec URL vide');
+                console.warn('[NodeAdapter] loadImage called with null/empty URL');
                 if (typeof callback === 'function')
                     callback.call(context, null, true);
                 return null;
             }
-            // Data URL (base64)
+            // Check if it's a data URL (base64 embedded image)
             if (url.startsWith('data:')) {
-                console.log('[NodeAdapter] Chargement data URL...');
+                console.log('[NodeAdapter] Detected data URL (base64), loading from embedded data...');
                 try {
+                    // Extract base64 data from data URL
+                    // Format: data:image/png;base64,iVBORw0KG...
                     const matches = url.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
                     if (!matches || matches.length !== 3) {
-                        throw new Error('Format data URL invalide');
+                        throw new Error('Invalid data URL format');
                     }
+                    const mimeType = matches[1];
                     const base64Data = matches[2];
+                    console.log(`[NodeAdapter] Data URL MIME type: ${mimeType}`);
+                    console.log(`[NodeAdapter] Base64 data length: ${base64Data.length} chars`);
+                    // Convert base64 to buffer
                     const buffer = Buffer.from(base64Data, 'base64');
+                    console.log(`[NodeAdapter] Buffer created: ${buffer.length} bytes`);
+                    // Create NodeImage from buffer
                     const img = new NodeImage();
                     img.src = buffer;
+                    console.log(`[NodeAdapter] NodeImage created from base64, dimensions: ${img.width}x${img.height}`);
+                    // Call callback immediately (synchronous for data URLs)
                     if (typeof callback === 'function') {
                         callback.call(context, img, false);
+                        console.log('[NodeAdapter] Base64 image callback executed successfully');
                     }
                     return img;
                 }
                 catch (error) {
-                    console.error('[NodeAdapter] Échec chargement base64:', error.message);
+                    console.error('[NodeAdapter] Failed to load base64 image:', error.message);
                     if (typeof callback === 'function')
                         callback.call(context, null, true);
                     return null;
                 }
             }
-            // URL distante
-            console.log('[NodeAdapter] Chargement URL distante...');
+            // Otherwise, it's a remote URL - fetch it
+            console.log('[NodeAdapter] Detected remote URL, fetching...');
             (0, node_fetch_1.default)(url, {
                 timeout: 15000,
                 headers: { 'User-Agent': 'CraftersUp-Canvas-Renderer/1.0' },
                 agent: httpsAgent,
             })
                 .then((response) => {
+                console.log(`[NodeAdapter] Image fetch response: ${response.status} ${response.statusText}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 return response.buffer();
             })
                 .then((buffer) => {
+                console.log(`[NodeAdapter] Image buffer received: ${buffer.length} bytes`);
                 const img = new NodeImage();
                 img.src = buffer;
+                console.log(`[NodeAdapter] NodeImage created, dimensions: ${img.width}x${img.height}`);
                 if (typeof callback === 'function') {
                     callback.call(context, img, false);
+                    console.log('[NodeAdapter] Remote image callback executed successfully');
                 }
             })
                 .catch((err) => {
-                console.error(`[NodeAdapter] Échec chargement image:`, err.message);
+                console.error(`[NodeAdapter] Failed to load image from ${url === null || url === void 0 ? void 0 : url.substring(0, 80)}:`);
+                console.error(`[NodeAdapter] Error: ${err.message}`);
+                console.error(`[NodeAdapter] Stack: ${err.stack}`);
                 if (typeof callback === 'function')
                     callback.call(context, null, true);
             });
+            // Return Image instance for Fabric's expectations (workaround)
             try {
                 return new NodeImage();
             }
@@ -111,12 +141,13 @@ class CanvasRendererNodeAdapter {
             }
         };
         this.fabricPatchesApplied = true;
-        console.log('[NodeAdapter] Patches Fabric.js appliqués');
+        console.log('[NodeAdapter] Fabric.js patches applied successfully');
     }
     /**
-     * Patch node-canvas pour compatibilité Fabric.js
+     * Patch node-canvas instance to work with Fabric.js (similar to ExpressApp1)
      */
     patchNodeCanvasForFabric(canvas) {
+        // Add minimal DOM-like properties that Fabric expects (exactly like ExpressApp1)
         if (!canvas.style)
             canvas.style = {};
         if (!canvas.style.setProperty)
@@ -141,14 +172,17 @@ class CanvasRendererNodeAdapter {
         return canvas;
     }
     /**
-     * Créer fabric canvas avec backend node-canvas
+     * Create fabric canvas with node-canvas backend
      */
     createCanvas(width, height) {
-        console.log(`[NodeAdapter] Création canvas: ${width}x${height}`);
+        console.log(`[NodeAdapter] Creating fabric canvas: ${width}x${height}`);
+        // Apply fabric patches first
         this.applyFabricNodePatches();
+        // CRITICAL: Override fabric's canvas creation BEFORE creating StaticCanvas
         const self = this;
         fabric.util.createCanvasElement = function () {
             const canvas = createCanvas(width, height);
+            // Add complete style mock with all CSS methods
             const mockStyle = {
                 width: `${width}px`,
                 height: `${height}px`,
@@ -167,158 +201,260 @@ class CanvasRendererNodeAdapter {
                 }
             };
             canvas.style = mockStyle;
-            if (!canvas.ownerDocument) {
-                canvas.ownerDocument = {
-                    defaultView: {
-                        getComputedStyle: () => ({
-                            getPropertyValue: (prop) => (prop === 'font-family' ? 'sans-serif' : '')
-                        })
-                    },
-                    createElement: (tag) => {
-                        if (tag === 'canvas') {
-                            return createCanvas(width, height);
-                        }
-                        return {};
-                    }
-                };
-            }
-            if (!canvas.hasAttribute)
-                canvas.hasAttribute = (n) => (n === 'width' || n === 'height');
-            if (!canvas.setAttribute)
-                canvas.setAttribute = (n, v) => { };
-            if (!canvas.addEventListener)
-                canvas.addEventListener = () => { };
-            if (!canvas.removeEventListener)
-                canvas.removeEventListener = () => { };
-            if (!canvas.getBoundingClientRect) {
-                canvas.getBoundingClientRect = () => ({
-                    left: 0, top: 0, width, height, right: width, bottom: height
-                });
-            }
+            // Mock DOM element interface
+            canvas.tagName = 'CANVAS';
+            canvas.nodeName = 'CANVAS';
+            canvas.nodeType = 1;
+            canvas.addEventListener = () => { };
+            canvas.removeEventListener = () => { };
+            canvas.dispatchEvent = () => true;
+            canvas.setAttribute = () => { };
+            canvas.getAttribute = () => null;
+            canvas.removeAttribute = () => { };
+            canvas.hasAttribute = () => false;
+            canvas.classList = {
+                add: () => { },
+                remove: () => { },
+                contains: () => false,
+                toggle: () => false
+            };
+            canvas.getBoundingClientRect = () => ({
+                left: 0, top: 0, right: width, bottom: height,
+                width: width, height: height, x: 0, y: 0
+            });
+            canvas.ownerDocument = {
+                defaultView: {
+                    getComputedStyle: () => mockStyle
+                }
+            };
+            canvas.parentNode = {
+                removeChild: () => { },
+                appendChild: () => { }
+            };
+            canvas.remove = () => { }; // CRITICAL: Add remove method
+            canvas.dataset = {};
             return canvas;
         };
-        const fabricCanvas = new fabric.StaticCanvas(null, {
-            width,
-            height,
-            enableRetinaScaling: false,
-            renderOnAddRemove: true,
-            skipOffscreen: false,
-        });
-        this.fabricCanvas = fabricCanvas;
-        console.log('[NodeAdapter] ✓ Canvas créé avec succès');
-        return fabricCanvas;
+        // Override image creation
+        fabric.util.createImage = function () {
+            const img = new NodeImage();
+            img.tagName = 'IMG';
+            img.nodeName = 'IMG';
+            img.nodeType = 1;
+            return img;
+        };
+        // Patch type checking
+        const originalIsCanvas = fabric.util.isCanvas;
+        fabric.util.isCanvas = function (el) {
+            return el && (originalIsCanvas.call(this, el) ||
+                (typeof el.getContext === 'function' && typeof el.toBuffer === 'function'));
+        };
+        try {
+            // Create StaticCanvas - it will use our createCanvasElement override
+            this.fabricCanvas = new fabric.StaticCanvas(null, {
+                width: width,
+                height: height,
+                backgroundColor: '#ffffff',
+                enableRetinaScaling: false,
+                renderOnAddRemove: false
+            });
+            console.log(`[NodeAdapter] Successfully created Fabric StaticCanvas: ${width}x${height}`);
+            return this.fabricCanvas;
+        }
+        catch (error) {
+            console.error('[NodeAdapter] Failed to create canvas:', error);
+            console.error('[NodeAdapter] Error stack:', error.stack);
+            throw error;
+        }
     }
     /**
-     * METHODE AMELIOREE: Charger une police dynamiquement
-     * Utilise le FontManager - PAS D'INSTALLATION SYSTEME REQUISE!
+     * Load font with memory-first caching strategy
+     * Keeps font in memory, writes to disk only when needed for registration
      */
     loadFont(font) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`[NodeAdapter] ========================================`);
-            console.log(`[NodeAdapter] Chargement de la police: ${font.designation}`);
-            console.log(`[NodeAdapter] ID: ${font.idFont}`);
-            console.log(`[NodeAdapter] ========================================`);
             try {
-                // Vérifier si déjà chargée
-                if (this.fontManager.isFontLoaded(font.idFont)) {
-                    const fontInfo = this.fontManager.getFontInfo(font.idFont);
-                    console.log(`[NodeAdapter] ✓ Police déjà en cache: "${fontInfo === null || fontInfo === void 0 ? void 0 : fontInfo.internalName}"`);
+                console.log(`[NodeAdapter] Loading font: ${font.designation} (${font.idFont})`);
+                // Check if already registered
+                if (this.fontPathCache.has(font.idFont)) {
+                    console.log(`[NodeAdapter] Font ${font.idFont} already registered (using cached path)`);
                     return;
                 }
-                // Télécharger la police depuis l'API
-                console.log(`[NodeAdapter] Téléchargement depuis: ${font.fontUrl}`);
-                const fontBuffer = yield this.fetchFontFromAPI(font.fontUrl);
-                console.log(`[NodeAdapter] Police téléchargée: ${fontBuffer.length} octets`);
-                // Utiliser le FontManager pour charger et enregistrer
-                const internalName = yield this.fontManager.loadAndRegisterFont(fontBuffer, font.idFont);
-                console.log(`[NodeAdapter] ========================================`);
-                console.log(`[NodeAdapter] ✓ POLICE PRETE: "${internalName}"`);
-                console.log(`[NodeAdapter] ✓ Utilisable dans fabric.js!`);
-                console.log(`[NodeAdapter] ========================================`);
+                // Step 1: Check memory cache first
+                let fontBuffer;
+                if (this.fontBufferCache.has(font.idFont)) {
+                    console.log(`[NodeAdapter] Font ${font.idFont} found in memory cache`);
+                    fontBuffer = this.fontBufferCache.get(font.idFont);
+                }
+                else {
+                    // Step 2: Fetch from URL (only once)
+                    const fontUrl = font.fontUrl || `https://localhost:44301/ImageManagement/GetDocumentFileFont?tenantId=52&documentFileId=${font.idFont}&fontType=ttf`;
+                    console.log(`[NodeAdapter] Fetching font from: ${fontUrl}`);
+                    const response = yield (0, node_fetch_1.default)(fontUrl, {
+                        timeout: 10000,
+                        headers: { 'User-Agent': 'CraftersUp-Canvas-Renderer/1.0' },
+                        agent: httpsAgent,
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    fontBuffer = yield response.buffer();
+                    console.log(`[NodeAdapter] Font fetched: ${fontBuffer.length} bytes`);
+                    // Store in memory cache
+                    this.fontBufferCache.set(font.idFont, fontBuffer);
+                    console.log(`[NodeAdapter] Font cached in memory`);
+                }
+                // Step 3: Extract font name using opentype.js (works with Buffer!)
+                const arrayBuffer = fontBuffer.buffer.slice(fontBuffer.byteOffset, fontBuffer.byteOffset + fontBuffer.byteLength);
+                const fontData = opentype.parse(arrayBuffer);
+                console.log(`[NodeAdapter] opentype.js parsed font successfully`);
+                // Access font names with type safety workaround (cast to any to access all properties)
+                const names = fontData.names;
+                let internalName = this.getPreferredStringName(names.postScriptName) ||
+                    this.getPreferredStringName(names.typographicFamily) ||
+                    this.getPreferredStringName(names.preferredFamily) ||
+                    this.getPreferredStringName(names.fontFamily) ||
+                    this.getPreferredStringName(names.fullName) ||
+                    font.designation ||
+                    font.idFont;
+                console.log(`[NodeAdapter] Font internal name: "${internalName}"`);
+                // Step 4: Write to temp file ONLY for node-canvas registration
+                // (Unfortunately unavoidable - node-canvas requires file path)
+                const fontHash = crypto.createHash('md5').update(font.idFont).digest('hex').substring(0, 8);
+                const extension = ((_a = font.fontUrl) === null || _a === void 0 ? void 0 : _a.includes('fontType=otf')) ? 'otf' : 'ttf';
+                const filename = `${font.idFont.replace(/[^a-zA-Z0-9]/g, '_')}_${fontHash}.${extension}`;
+                const tempPath = path.join(this.tempFontDir, filename);
+                // Only write if file doesn't exist
+                if (!fs.existsSync(tempPath)) {
+                    fs.writeFileSync(tempPath, fontBuffer);
+                    console.log(`[NodeAdapter] Font written to temp: ${tempPath}`);
+                }
+                else {
+                    console.log(`[NodeAdapter] Temp file already exists: ${tempPath}`);
+                }
+                // Step 5: Register with node-canvas (requires file path)
+                registerFont(tempPath, { family: internalName });
+                // Step 6: Verify font is registered and available
+                yield this.verifyFontRegistration(internalName, tempPath);
+                // Cache the path for reuse
+                this.fontPathCache.set(font.idFont, tempPath);
+                console.log(`[NodeAdapter] Font ${font.idFont} registered as "${internalName}"`);
             }
             catch (error) {
-                console.error(`[NodeAdapter] ❌ Échec du chargement de la police ${font.idFont}:`, error.message);
-                throw error;
+                console.error(`[NodeAdapter] Failed to load font ${font.idFont}:`, error.message);
             }
         });
     }
     /**
-     * Télécharger une police depuis l'API
+     * Verify font is registered and available in node-canvas
      */
-    fetchFontFromAPI(fontUrl) {
+    verifyFontRegistration(fontFamily, fontPath, maxRetries = 3) {
         return __awaiter(this, void 0, void 0, function* () {
-            const response = yield (0, node_fetch_1.default)(fontUrl, {
-                timeout: 30000,
-                headers: { 'User-Agent': 'CraftersUp-Canvas-Renderer/1.0' },
-                agent: httpsAgent,
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            console.log(`[NodeAdapter] Verifying font registration: "${fontFamily}"`);
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    // Create a test canvas
+                    const testCanvas = createCanvas(100, 50);
+                    const ctx = testCanvas.getContext('2d');
+                    // Try to use the font
+                    ctx.font = `20px "${fontFamily}"`;
+                    ctx.fillText('Test', 10, 30);
+                    // If we got here without error, font is registered
+                    console.log(`[NodeAdapter] Font "${fontFamily}" verified (attempt ${attempt})`);
+                    return;
+                }
+                catch (error) {
+                    console.warn(`[NodeAdapter] Font verification attempt ${attempt} failed:`, error);
+                    if (attempt < maxRetries) {
+                        // Wait before retry
+                        yield new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    else {
+                        console.error(`[NodeAdapter] Font "${fontFamily}" verification failed after ${maxRetries} attempts`);
+                        // Don't throw - allow rendering with fallback font
+                    }
+                }
             }
-            return yield response.buffer();
         });
     }
     /**
-     * Charger une image
+     * Helper to get preferred string name from opentype.js name field
+     */
+    getPreferredStringName(nameField) {
+        if (nameField && typeof nameField === 'object' && nameField.en && typeof nameField.en === 'string' && nameField.en.trim() !== '') {
+            return nameField.en.trim();
+        }
+        if (nameField && typeof nameField === 'string' && nameField.trim() !== '') {
+            return nameField.trim();
+        }
+        return undefined;
+    }
+    /**
+     * Load image from URL for node-canvas
      */
     loadImage(url) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                // Use node-canvas's loadImage function directly
                 const img = yield loadImage(url);
                 return img;
             }
             catch (error) {
-                console.error(`[NodeAdapter] Échec chargement image:`, error.message);
-                throw new Error(`Échec chargement image: ${error.message}`);
+                console.error(`[NodeAdapter] Failed to load image from ${url}:`, error.message);
+                throw new Error(`Failed to load image: ${error.message}`);
             }
         });
     }
     /**
-     * Exporter le canvas en PNG
+     * Export canvas to PNG - MATCHES Angular component approach
+     * Angular uses: canvas.toDataURL({ format: 'png' })
+     * ENHANCED: Added verification steps to ensure fonts and images are loaded
      */
     exportCanvas(canvas) {
         return __awaiter(this, void 0, void 0, function* () {
             if (!canvas) {
-                throw new Error('Canvas non initialisé');
+                throw new Error('Canvas not initialized');
             }
-            console.log('[NodeAdapter] Début de l\'export avec vérification...');
-            // Vérifier l'image de fond
+            console.log('[NodeAdapter] Starting canvas export with verification...');
+            // STEP 1: Verify background is set
             if (canvas.backgroundImage) {
-                console.log('[NodeAdapter] Image de fond détectée');
+                console.log('[NodeAdapter] Background image detected');
+                // Ensure background image is fully loaded
                 const bgImg = canvas.backgroundImage;
                 if (bgImg._element && !bgImg._element.complete) {
-                    console.log('[NodeAdapter] Attente du chargement de l\'image de fond...');
+                    console.log('[NodeAdapter] Waiting for background image to load...');
                     yield new Promise((resolve) => {
                         bgImg._element.onload = () => resolve();
-                        setTimeout(() => resolve(), 2000);
+                        setTimeout(() => resolve(), 2000); // 2s timeout
                     });
                 }
             }
             else if (canvas.backgroundColor) {
-                console.log(`[NodeAdapter] Couleur de fond: ${canvas.backgroundColor}`);
+                console.log(`[NodeAdapter] Background color: ${canvas.backgroundColor}`);
             }
-            // Vérifier tous les objets
+            // STEP 2: Verify all objects are ready
             const objects = canvas.getObjects();
-            console.log(`[NodeAdapter] Vérification de ${objects.length} objets...`);
+            console.log(`[NodeAdapter] Verifying ${objects.length} canvas objects...`);
             for (const obj of objects) {
                 if (obj.type === 'image' && obj._element) {
                     if (!obj._element.complete && obj._element.width === 0) {
-                        console.warn('[NodeAdapter] Image non complètement chargée, attente...');
+                        console.warn('[NodeAdapter] Image not fully loaded, waiting...');
                         yield new Promise(resolve => setTimeout(resolve, 200));
                     }
                 }
             }
-            // Forcer le rendu
-            console.log('[NodeAdapter] Rendu du canvas...');
+            // STEP 3: Force render
+            console.log('[NodeAdapter] Rendering canvas...');
             canvas.renderAll();
-            // Délai pour s'assurer que le pipeline de rendu est terminé
+            // STEP 4: Small delay to ensure rendering pipeline completes
             yield new Promise(resolve => setTimeout(resolve, 150));
-            // Export
-            console.log('[NodeAdapter] Export en PNG...');
+            // STEP 5: Export
+            console.log('[NodeAdapter] Exporting to PNG...');
             const dataURL = canvas.toDataURL({ format: 'png', quality: 1 });
             const base64Data = dataURL.replace(/^data:image\/\w+;base64,/, '');
             const buffer = Buffer.from(base64Data, 'base64');
-            console.log(`[NodeAdapter] ✓ Export terminé: ${buffer.length} octets`);
+            console.log(`[NodeAdapter] Export complete: ${buffer.length} bytes`);
             return {
                 buffer,
                 dataUrl: dataURL,
@@ -329,27 +465,66 @@ class CanvasRendererNodeAdapter {
         });
     }
     /**
-     * Nettoyer les ressources
+     * Cleanup - clear memory cache and dispose canvas
      */
     cleanup() {
-        console.log('[NodeAdapter] Nettoyage des ressources');
+        console.log('[NodeAdapter] Cleaning up resources');
         if (this.fabricCanvas) {
             this.fabricCanvas.dispose();
             this.fabricCanvas = null;
         }
-        // Le FontManager gère son propre nettoyage
+        // Clear memory cache
+        console.log(`[NodeAdapter] Clearing ${this.fontBufferCache.size} fonts from memory cache`);
+        this.fontBufferCache.clear();
     }
     /**
-     * Statistiques du cache
+     * Clear all caches including temp files
+     */
+    clearAllCaches() {
+        console.log('[NodeAdapter] Clearing all caches');
+        // Clear memory
+        this.fontBufferCache.clear();
+        // Delete temp files
+        this.fontPathCache.forEach((fontPath, fontId) => {
+            try {
+                if (fs.existsSync(fontPath)) {
+                    fs.unlinkSync(fontPath);
+                    console.log(`[NodeAdapter] Deleted temp file: ${fontPath}`);
+                }
+            }
+            catch (error) {
+                console.warn(`[NodeAdapter] Failed to delete ${fontPath}:`, error);
+            }
+        });
+        this.fontPathCache.clear();
+    }
+    /**
+     * Get cache statistics
      */
     getCacheStats() {
-        return this.fontManager.getCacheStats();
-    }
-    /**
-     * Obtenir les polices enregistrées
-     */
-    getRegisteredFonts() {
-        return this.fontManager.getRegisteredFonts();
+        let memorySize = 0;
+        let diskSize = 0;
+        // Calculate memory size
+        this.fontBufferCache.forEach((buffer) => {
+            memorySize += buffer.length;
+        });
+        // Calculate disk size
+        this.fontPathCache.forEach((fontPath) => {
+            try {
+                if (fs.existsSync(fontPath)) {
+                    const stats = fs.statSync(fontPath);
+                    diskSize += stats.size;
+                }
+            }
+            catch (error) {
+                // Ignore errors
+            }
+        });
+        return {
+            fontCount: this.fontBufferCache.size,
+            memorySize,
+            diskSize,
+        };
     }
 }
 exports.CanvasRendererNodeAdapter = CanvasRendererNodeAdapter;

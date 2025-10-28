@@ -307,13 +307,12 @@ export class CanvasRendererCore {
               // STEP 2: Wait for all regular image objects to load
               console.log(`[CanvasRendererCore] Canvas has ${canvas.getObjects().length} objects`);
               await this.waitForAllImagesToLoad(canvas);
-              console.log('[CanvasRendererCore] All images loaded');
               
               // STEP 3: Final render
               canvas.renderAll();
               console.log('[CanvasRendererCore] Canvas fully loaded and rendered');
               resolve();
-              console.log(`[CanvasRendererCore] Final object count: ${canvas.getObjects().length}`);
+              
             } catch (renderError) {
               console.error('[CanvasRendererCore] Error during post-load:', renderError);
               // Don't reject - try to render anyway
@@ -374,7 +373,7 @@ export class CanvasRendererCore {
    * Main entry point that orchestrates the entire render process
    */
   async render(options: CanvasRenderOptions): Promise<RenderResult> {
-    console.log(`[CanvasRendererCore] Starting render in ${options.environment} environment`);
+    console.log(`[CanvasRendererCore Ts] Starting render in ${options.environment} environment`);
 
     const startTime = Date.now();
 
