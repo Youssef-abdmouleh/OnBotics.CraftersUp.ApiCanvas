@@ -226,8 +226,8 @@ function extractFontsFromDesign(designJson) {
  * Save preview image to storage
  */
 function savePreviewImage(buffer, filename) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const storageDir = ((_a = config_1.default.storage) === null || _a === void 0 ? void 0 : _a.previewDir) || path.join(__dirname, '../storage/previews');
         // Ensure storage directory exists
         if (!fs.existsSync(storageDir)) {

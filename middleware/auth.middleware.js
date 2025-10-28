@@ -4,7 +4,7 @@
  * TODO: Replace with proper authentication system for production
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.authMiddleware = void 0;
+exports.authMiddleware = authMiddleware;
 const config_1 = require("../config");
 /**
  * Basic authentication middleware
@@ -59,5 +59,4 @@ function authMiddleware(req, res, next) {
         });
     }
 }
-exports.authMiddleware = authMiddleware;
 //# sourceMappingURL=auth.middleware.js.map

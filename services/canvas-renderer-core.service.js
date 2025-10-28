@@ -113,8 +113,8 @@ class CanvasRendererCore {
     /**
      * Wait for background image to load
      */
-    waitForBackgroundImageLoad(canvas, timeoutMs = 10000) {
-        return __awaiter(this, void 0, void 0, function* () {
+    waitForBackgroundImageLoad(canvas_1) {
+        return __awaiter(this, arguments, void 0, function* (canvas, timeoutMs = 10000) {
             return new Promise((resolve) => {
                 const bgImg = canvas.backgroundImage;
                 if (!bgImg) {
@@ -157,8 +157,8 @@ class CanvasRendererCore {
     /**
      * Wait for all fabric image objects to finish loading
      */
-    waitForAllImagesToLoad(canvas, timeoutMs = 5000) {
-        return __awaiter(this, void 0, void 0, function* () {
+    waitForAllImagesToLoad(canvas_1) {
+        return __awaiter(this, arguments, void 0, function* (canvas, timeoutMs = 5000) {
             const objects = canvas.getObjects();
             const imageObjects = objects.filter((obj) => obj.type === 'image');
             console.log(`[CanvasRendererCore] Waiting for ${imageObjects.length} image objects to load`);
