@@ -1,10 +1,42 @@
+// CRITICAL: Configure fontconfig BEFORE any node-canvas imports
+// This must be the FIRST thing in the application to ensure Pango can find fonts
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Configure fontconfig paths for Pango font loading
+const TEMP_FONT_DIR = process.env.TEMP_DIR || '/tmp/canvas-fonts';
+const FONTCONFIG_DIR = path.join(__dirname, 'fontconfig');
+const FONTCONFIG_FILE = path.join(FONTCONFIG_DIR, 'fonts.conf');
+const FONTCONFIG_CACHE = '/tmp/fontconfig-cache';
+
+// Ensure directories exist
+if (!fs.existsSync(TEMP_FONT_DIR)) {
+  fs.mkdirSync(TEMP_FONT_DIR, { recursive: true });
+  console.log(`[Fontconfig] Created font directory: ${TEMP_FONT_DIR}`);
+}
+if (!fs.existsSync(FONTCONFIG_CACHE)) {
+  fs.mkdirSync(FONTCONFIG_CACHE, { recursive: true });
+  console.log(`[Fontconfig] Created cache directory: ${FONTCONFIG_CACHE}`);
+}
+
+// Set fontconfig environment variables
+process.env.FONTCONFIG_FILE = FONTCONFIG_FILE;
+process.env.FONTCONFIG_PATH = FONTCONFIG_DIR;
+process.env.CUSTOM_FONT_DIR = TEMP_FONT_DIR;
+process.env.FC_DEBUG = '1'; // Enable fontconfig debugging (remove in production)
+
+console.log('[Fontconfig] Configuration:');
+console.log(`  FONTCONFIG_FILE: ${process.env.FONTCONFIG_FILE}`);
+console.log(`  FONTCONFIG_PATH: ${process.env.FONTCONFIG_PATH}`);
+console.log(`  CUSTOM_FONT_DIR: ${process.env.CUSTOM_FONT_DIR}`);
+console.log(`  Font directory: ${TEMP_FONT_DIR}`);
+
 // Load environment variables from .env file
 import * as dotenv from 'dotenv';
 dotenv.config();
 
 import * as express from 'express';
 import { AddressInfo } from 'net';
-import * as path from 'path';
 import * as cors from 'cors';
 import * as bodyParser from 'body-parser';
 import * as morgan from 'morgan';

@@ -26,6 +26,7 @@ export interface ICanvasEnvironmentAdapter {
   loadFont(font: FontDefinition): Promise<void>;
   loadImage(url: string): Promise<any>;
   exportCanvas(canvas: any): Promise<RenderResult>; // fabric.Canvas not available in CommonJS import
+  rebuildFontCache?(): Promise<void>; // Optional: Rebuild font cache for Pango
   cleanup(): void;
 }
 
@@ -56,6 +57,7 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
   private fontIdToNameMap: Map<string, string> = new Map(); // CRITICAL: fontId (GUID) → fontFamily (human name)
   private tempFontDir: string;
   private fabricPatchesApplied: boolean = false;
+  private fontconfigCacheRebuilt: boolean = false; // Track if we've rebuilt fontconfig cache
 
   constructor(tempDir: string = '/tmp/canvas-fonts') {
     this.tempFontDir = tempDir;
@@ -67,6 +69,48 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
     }
 
     console.log('[NodeAdapter] Initialized with memory-first font caching and GUID mapping');
+    console.log(`[NodeAdapter] Fontconfig paths:`);
+    console.log(`  FONTCONFIG_FILE: ${process.env.FONTCONFIG_FILE || 'not set'}`);
+    console.log(`  FONTCONFIG_PATH: ${process.env.FONTCONFIG_PATH || 'not set'}`);
+    console.log(`  CUSTOM_FONT_DIR: ${process.env.CUSTOM_FONT_DIR || 'not set'}`);
+  }
+
+  /**
+   * Rebuild fontconfig cache to make new fonts available to Pango
+   * CRITICAL: Must be called after downloading fonts
+   * Public method to be called from CanvasRendererCore after loading all fonts
+   */
+  async rebuildFontCache(): Promise<void> {
+    if (this.fontconfigCacheRebuilt) {
+      console.log('[NodeAdapter] Fontconfig cache already rebuilt this session');
+      return;
+    }
+
+    try {
+      console.log('[NodeAdapter] Rebuilding fontconfig cache for Pango...');
+
+      // Use child_process to run fc-cache
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+
+      // Force rebuild cache for our font directory
+      const command = `fc-cache -f "${this.tempFontDir}"`;
+      console.log(`[NodeAdapter] Running: ${command}`);
+
+      const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+      if (stdout) console.log(`[NodeAdapter] fc-cache stdout: ${stdout}`);
+      if (stderr) console.log(`[NodeAdapter] fc-cache stderr: ${stderr}`);
+
+      this.fontconfigCacheRebuilt = true;
+      console.log('[NodeAdapter] Fontconfig cache rebuilt successfully');
+
+    } catch (error: any) {
+      console.error('[NodeAdapter] Failed to rebuild fontconfig cache:', error.message);
+      console.error('[NodeAdapter] Fonts may not be available to Pango');
+      // Don't throw - try to continue anyway
+    }
   }
 
   /**
