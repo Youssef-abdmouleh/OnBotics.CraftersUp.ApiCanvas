@@ -187,40 +187,25 @@ function validateRenderRequest(request) {
 }
 /**
  * Extract font definitions from design JSON
- * Enhanced to handle nested groups and all text object types
+ * Uses the fonts registry from design JSON (fonts array with fontId, fontFamily, url)
  */
 function extractFontsFromDesign(designJson) {
-    const fontMap = new Map();
-    // Recursively traverse ALL objects including nested groups
-    function traverseObjects(objects) {
-        if (!objects)
-            return;
-        objects.forEach((obj) => {
-            // Check for text objects (all types)
-            if (obj.type === 'textbox' || obj.type === 'text' || obj.type === 'i-text') {
-                const fontFamily = obj.fontFamily;
-                if (fontFamily && !fontMap.has(fontFamily)) {
-                    // For now, we assume fonts are already registered or available
-                    // In a production system, you'd maintain a font registry
-                    // https://localhost:44301/ImageManagement/GetDocumentFileFont?tenantId=52&documentFileId=b8b8629e-0234-49b6-b1f5-5e953c531098&fontType=ttf
-                    fontMap.set(fontFamily, {
-                        idFont: fontFamily,
-                        designation: fontFamily,
-                        fontUrl: `https://localhost:44301/ImageManagement/GetDocumentFileFont?tenantId=52&documentFileId=${fontFamily}&fontType=ttf`, // Font URL would come from a font registry service
-                    });
-                }
-            }
-            // Recursively check groups
-            if (obj.type === 'group' && obj.objects) {
-                traverseObjects(obj.objects);
+    const fonts = [];
+    // CRITICAL: Use the fonts registry from design JSON
+    // This contains the mapping: fontId (GUID) → fontFamily (human name from TTF file)
+    if (designJson.fonts && Array.isArray(designJson.fonts)) {
+        designJson.fonts.forEach((font) => {
+            if (font.fontId && font.fontFamily && font.url) {
+                fonts.push({
+                    idFont: font.fontId, // GUID: "14c18318-efae-4ad7-9fed-9d58edab2613"
+                    designation: font.fontFamily, // Human name: "Book Antiqua"
+                    fontUrl: font.url, // Download URL
+                    fontFamily: font.fontFamily, // CRITICAL: Internal name from TTF file
+                });
             }
         });
     }
-    // Traverse fabric objects to find text objects with fonts
-    if (designJson.fabricData && designJson.fabricData.objects) {
-        traverseObjects(designJson.fabricData.objects);
-    }
-    return Array.from(fontMap.values());
+    return fonts;
 }
 /**
  * Save preview image to storage

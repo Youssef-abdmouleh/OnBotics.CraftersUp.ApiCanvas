@@ -37,6 +37,7 @@ class CanvasRendererNodeAdapter {
         this.fabricCanvas = null;
         this.fontBufferCache = new Map(); // Memory cache for font buffers
         this.fontPathCache = new Map(); // File path cache for registered fonts
+        this.fontIdToNameMap = new Map(); // CRITICAL: fontId (GUID) → fontFamily (human name)
         this.fabricPatchesApplied = false;
         this.tempFontDir = tempDir;
         // Ensure temp directory exists
@@ -44,7 +45,7 @@ class CanvasRendererNodeAdapter {
             fs.mkdirSync(this.tempFontDir, { recursive: true });
             console.log(`[NodeAdapter] Created temp font directory: ${this.tempFontDir}`);
         }
-        console.log('[NodeAdapter] Initialized with memory-first font caching');
+        console.log('[NodeAdapter] Initialized with memory-first font caching and GUID mapping');
     }
     /**
      * Apply Fabric.js patches for Node.js environment (similar to ExpressApp1)
@@ -304,11 +305,15 @@ class CanvasRendererNodeAdapter {
                     this.fontBufferCache.set(font.idFont, fontBuffer);
                     console.log(`[NodeAdapter] Font cached in memory`);
                 }
-                // Step 3: CRITICAL - Use font.idFont (GUID) as family name for multi-tenant support
-                // The font.idFont is the GUID that matches the fontFamily in Fabric JSON
-                // This ensures each tenant's fonts are isolated and correctly applied
-                const fontFamilyName = font.idFont; // Use GUID as family name
-                console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}"`);
+                // Step 3: CRITICAL - Use font.fontFamily (human name from TTF) for registration
+                // The TTF file contains the internal font name (e.g., "Book Antiqua")
+                // node-canvas/Pango uses this internal name, NOT our custom family parameter
+                // We must also store the mapping: fontId (GUID) → fontFamily (human name)
+                const fontFamilyName = font.fontFamily; // Use human name from TTF file
+                console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}" (from fontFamily field)`);
+                console.log(`[NodeAdapter] Creating mapping: ${font.idFont} → ${fontFamilyName}`);
+                // Store the mapping for JSON transformation later
+                this.fontIdToNameMap.set(font.idFont, fontFamilyName);
                 // Step 4: Write to temp file ONLY for node-canvas registration
                 // (Unfortunately unavoidable - node-canvas requires file path)
                 const fontHash = crypto.createHash('md5').update(font.idFont).digest('hex').substring(0, 8);
@@ -323,8 +328,8 @@ class CanvasRendererNodeAdapter {
                 else {
                     console.log(`[NodeAdapter] Temp file already exists: ${tempPath}`);
                 }
-                // Step 5: Register with node-canvas using font.idFont (GUID) as family name
-                // This is the KEY FIX: Use the GUID instead of internal font name
+                // Step 5: Register with node-canvas using fontFamily (human name)
+                // This matches the internal name in the TTF file
                 registerFont(tempPath, { family: fontFamilyName });
                 // Step 6: Verify font is registered and available
                 yield this.verifyFontRegistration(fontFamilyName, tempPath);
@@ -455,6 +460,7 @@ class CanvasRendererNodeAdapter {
         // Clear memory cache
         console.log(`[NodeAdapter] Clearing ${this.fontBufferCache.size} fonts from memory cache`);
         this.fontBufferCache.clear();
+        // Note: Keep fontIdToNameMap for reuse across requests
     }
     /**
      * Clear all caches including temp files
@@ -463,6 +469,7 @@ class CanvasRendererNodeAdapter {
         console.log('[NodeAdapter] Clearing all caches');
         // Clear memory
         this.fontBufferCache.clear();
+        this.fontIdToNameMap.clear();
         // Delete temp files
         this.fontPathCache.forEach((fontPath, fontId) => {
             try {
@@ -504,6 +511,14 @@ class CanvasRendererNodeAdapter {
             memorySize,
             diskSize,
         };
+    }
+    /**
+     * Get font ID to font family name mapping
+     * CRITICAL: Used to transform Fabric JSON from GUID → human name
+     * Returns Map<fontId (GUID), fontFamily (human name)>
+     */
+    getFontIdToNameMap() {
+        return new Map(this.fontIdToNameMap); // Return copy to prevent external modification
     }
 }
 exports.CanvasRendererNodeAdapter = CanvasRendererNodeAdapter;

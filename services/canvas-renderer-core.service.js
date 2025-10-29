@@ -205,6 +205,50 @@ class CanvasRendererCore {
         });
     }
     /**
+     * Transform Fabric JSON to replace fontFamily GUIDs with human names
+     * CRITICAL: node-canvas/Pango uses the internal font name from TTF file
+     * We must replace all fontFamily GUIDs (e.g., "14c18318-efae-...") with human names (e.g., "Book Antiqua")
+     */
+    transformFontFamilies(fabricData) {
+        // Get the fontId → fontFamily mapping from the adapter
+        const fontIdToNameMap = this.adapter.getFontIdToNameMap();
+        if (!fontIdToNameMap || fontIdToNameMap.size === 0) {
+            console.log('[CanvasRendererCore] No font mappings available, skipping transformation');
+            return fabricData;
+        }
+        console.log(`[CanvasRendererCore] Transforming fontFamily fields with ${fontIdToNameMap.size} mappings`);
+        // Deep clone to avoid modifying original
+        const transformed = JSON.parse(JSON.stringify(fabricData));
+        // Recursive function to traverse and transform objects
+        const transformObjects = (objects) => {
+            if (!objects || !Array.isArray(objects))
+                return;
+            objects.forEach((obj) => {
+                // Transform text objects
+                if ((obj.type === 'textbox' || obj.type === 'text' || obj.type === 'i-text') && obj.fontFamily) {
+                    const originalFontFamily = obj.fontFamily;
+                    const humanName = fontIdToNameMap.get(originalFontFamily);
+                    if (humanName) {
+                        console.log(`[CanvasRendererCore] Transforming fontFamily: "${originalFontFamily}" → "${humanName}"`);
+                        obj.fontFamily = humanName;
+                    }
+                    else {
+                        console.warn(`[CanvasRendererCore] No mapping found for fontFamily: "${originalFontFamily}"`);
+                    }
+                }
+                // Recursively transform groups
+                if (obj.type === 'group' && obj.objects) {
+                    transformObjects(obj.objects);
+                }
+            });
+        };
+        // Transform main objects
+        if (transformed.objects) {
+            transformObjects(transformed.objects);
+        }
+        return transformed;
+    }
+    /**
      * Load canvas state from JSON
      * FIXED: Let loadFromJSON handle background naturally, then wait for completion
      */
@@ -225,8 +269,11 @@ class CanvasRendererCore {
                         height: customMetadata.height,
                     });
                     console.log(`[CanvasRendererCore] Canvas dimensions set`);
+                    // CRITICAL: Transform fabricData to replace fontFamily GUIDs with human names
+                    // This is required because node-canvas/Pango uses the internal font name from TTF file
+                    const transformedFabricData = this.transformFontFamilies(fabricData);
                     // CRITICAL: Load Fabric.js objects - this will handle background image via fabric.util.loadImage
-                    canvas.loadFromJSON(fabricData, 
+                    canvas.loadFromJSON(transformedFabricData, 
                     // Success callback - called after JSON parsing but BEFORE async image loads complete
                     () => __awaiter(this, void 0, void 0, function* () {
                         console.log(`[CanvasRendererCore] loadFromJSON callback - JSON parsed`);
