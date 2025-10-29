@@ -105,6 +105,13 @@ export class CanvasRendererCore {
       });
 
     await Promise.all(loadPromises);
+
+    // CRITICAL: Rebuild fontconfig cache so Pango can find the new fonts
+    // This is required because Pango doesn't use registerFont() - it scans directories
+    if (this.adapter.rebuildFontCache) {
+      console.log('[CanvasRendererCore] Rebuilding fontconfig cache for Pango...');
+      await this.adapter.rebuildFontCache();
+    }
   }
 
   /**

@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import fetch from 'node-fetch';
 import * as https from 'https';
 import config from '../config';
+import * as opentype from 'opentype.js';
 
 // Import node-canvas and fabric properly - MUST use CommonJS for Node.js!
 const { createCanvas, loadImage, registerFont, Canvas: NodeCanvas, Image: NodeImage } = require('canvas');
@@ -26,6 +27,7 @@ export interface ICanvasEnvironmentAdapter {
   loadFont(font: FontDefinition): Promise<void>;
   loadImage(url: string): Promise<any>;
   exportCanvas(canvas: any): Promise<RenderResult>; // fabric.Canvas not available in CommonJS import
+  rebuildFontCache?(): Promise<void>; // Optional: Rebuild font cache for Pango
   cleanup(): void;
 }
 
@@ -56,6 +58,9 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
   private fontIdToNameMap: Map<string, string> = new Map(); // CRITICAL: fontId (GUID) → fontFamily (human name)
   private tempFontDir: string;
   private fabricPatchesApplied: boolean = false;
+  private fontconfigCacheRebuilt: boolean = false; // Track if we've rebuilt fontconfig cache
+  private fontconfigAvailable: boolean | null = null; // null = not checked, true/false = result
+  private platform: string = process.platform; // 'win32', 'linux', 'darwin'
 
   constructor(tempDir: string = '/tmp/canvas-fonts') {
     this.tempFontDir = tempDir;
@@ -67,6 +72,148 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
     }
 
     console.log('[NodeAdapter] Initialized with memory-first font caching and GUID mapping');
+    console.log(`[NodeAdapter] Platform: ${this.platform}`);
+    console.log(`[NodeAdapter] Fontconfig paths:`);
+    console.log(`  FONTCONFIG_FILE: ${process.env.FONTCONFIG_FILE || 'not set'}`);
+    console.log(`  FONTCONFIG_PATH: ${process.env.FONTCONFIG_PATH || 'not set'}`);
+    console.log(`  CUSTOM_FONT_DIR: ${process.env.CUSTOM_FONT_DIR || 'not set'}`);
+  }
+
+  /**
+   * Check if fontconfig is available on this system
+   * Used to determine if we should use fontconfig or fallback to registerFont()
+   */
+  private async checkFontconfigAvailability(): Promise<boolean> {
+    if (this.fontconfigAvailable !== null) {
+      return this.fontconfigAvailable;
+    }
+
+    try {
+      // Try to run fc-list command
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+
+      await execAsync('fc-list --version', { timeout: 3000 });
+
+      this.fontconfigAvailable = true;
+      console.log('[NodeAdapter] ✓ Fontconfig detected - will use fontconfig for Pango');
+      return true;
+
+    } catch (error) {
+      this.fontconfigAvailable = false;
+      console.log('[NodeAdapter] ✗ Fontconfig NOT available - will use Windows fallback mode');
+      console.log('[NodeAdapter] Font loading will use internal TTF names from opentype.js');
+      return false;
+    }
+  }
+
+  /**
+   * Extract internal font name from TTF/OTF file using opentype.js
+   * Used on Windows when fontconfig is not available
+   *
+   * Priority order:
+   * 1. PostScript name (most reliable for Pango)
+   * 2. Typographic family name
+   * 3. Preferred family name
+   * 4. Font family name
+   * 5. Full name
+   * 6. Fallback to registry name
+   */
+  private async extractInternalFontName(fontBuffer: Buffer, font: FontDefinition): Promise<string> {
+    try {
+      // Convert Buffer to ArrayBuffer for opentype.js
+      const arrayBuffer = fontBuffer.buffer.slice(
+        fontBuffer.byteOffset,
+        fontBuffer.byteOffset + fontBuffer.byteLength
+      );
+
+      const fontData = opentype.parse(arrayBuffer);
+      const names = fontData.names as any;
+
+      // Try different name fields in priority order
+      let internalName =
+        this.getPreferredStringName(names.postScriptName) ||
+        this.getPreferredStringName(names.typographicFamily) ||
+        this.getPreferredStringName(names.preferredFamily) ||
+        this.getPreferredStringName(names.fontFamily) ||
+        this.getPreferredStringName(names.fullName) ||
+        font.fontFamily || // Fallback to registry name
+        font.designation ||
+        font.idFont;
+
+      return internalName;
+
+    } catch (error: any) {
+      console.error(`[NodeAdapter] Failed to extract internal font name:`, error.message);
+      // Fallback to registry name
+      return font.fontFamily || font.designation || font.idFont;
+    }
+  }
+
+  /**
+   * Helper to get preferred string name from opentype.js name field
+   * Handles both object format ({ en: "Font Name" }) and string format
+   */
+  private getPreferredStringName(nameField: any): string | undefined {
+    if (nameField && typeof nameField === 'object' && nameField.en && typeof nameField.en === 'string' && nameField.en.trim() !== '') {
+      return nameField.en.trim();
+    }
+    if (nameField && typeof nameField === 'string' && nameField.trim() !== '') {
+      return nameField.trim();
+    }
+    return undefined;
+  }
+
+  /**
+   * Rebuild fontconfig cache to make new fonts available to Pango
+   * CRITICAL: Must be called after downloading fonts
+   * Public method to be called from CanvasRendererCore after loading all fonts
+   *
+   * Works differently based on platform:
+   * - Linux/fontconfig available: Rebuilds fontconfig cache with fc-cache
+   * - Windows/no fontconfig: Uses registerFont() with internal font names
+   */
+  async rebuildFontCache(): Promise<void> {
+    // Check if fontconfig is available
+    const hasFontconfig = await this.checkFontconfigAvailability();
+
+    if (!hasFontconfig) {
+      console.log('[NodeAdapter] Fontconfig not available - fonts registered using internal names from TTF');
+      console.log('[NodeAdapter] Fallback mode: Fonts should work on Windows without fontconfig');
+      return; // registerFont() already called in loadFont(), nothing more to do
+    }
+
+    if (this.fontconfigCacheRebuilt) {
+      console.log('[NodeAdapter] Fontconfig cache already rebuilt this session');
+      return;
+    }
+
+    try {
+      console.log('[NodeAdapter] Rebuilding fontconfig cache for Pango...');
+
+      // Use child_process to run fc-cache
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+
+      // Force rebuild cache for our font directory
+      const command = `fc-cache -f "${this.tempFontDir}"`;
+      console.log(`[NodeAdapter] Running: ${command}`);
+
+      const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+      if (stdout) console.log(`[NodeAdapter] fc-cache stdout: ${stdout}`);
+      if (stderr) console.log(`[NodeAdapter] fc-cache stderr: ${stderr}`);
+
+      this.fontconfigCacheRebuilt = true;
+      console.log('[NodeAdapter] Fontconfig cache rebuilt successfully');
+
+    } catch (error: any) {
+      console.error('[NodeAdapter] Failed to rebuild fontconfig cache:', error.message);
+      console.error('[NodeAdapter] Fonts may not be available to Pango');
+      // Don't throw - try to continue anyway
+    }
   }
 
   /**
@@ -361,12 +508,26 @@ export class CanvasRendererNodeAdapter implements ICanvasEnvironmentAdapter {
         console.log(`[NodeAdapter] Font cached in memory`);
       }
 
-      // Step 3: CRITICAL - Use font.fontFamily (human name from TTF) for registration
-      // The TTF file contains the internal font name (e.g., "Book Antiqua")
-      // node-canvas/Pango uses this internal name, NOT our custom family parameter
-      // We must also store the mapping: fontId (GUID) → fontFamily (human name)
-      const fontFamilyName = font.fontFamily; // Use human name from TTF file
-      console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}" (from fontFamily field)`);
+      // Step 3: CRITICAL - Determine font family name based on environment
+      // Two strategies:
+      // A) Fontconfig available (Linux): Use font.fontFamily from registry
+      // B) No fontconfig (Windows): Extract internal name from TTF file using opentype.js
+
+      const hasFontconfig = await this.checkFontconfigAvailability();
+      let fontFamilyName: string;
+
+      if (hasFontconfig) {
+        // Strategy A: Use fontFamily from registry (faster, no parsing needed)
+        fontFamilyName = font.fontFamily;
+        console.log(`[NodeAdapter] Fontconfig mode: Using registry name "${fontFamilyName}"`);
+      } else {
+        // Strategy B: Extract internal name from TTF file
+        console.log(`[NodeAdapter] Windows fallback mode: Extracting internal name from TTF...`);
+        fontFamilyName = await this.extractInternalFontName(fontBuffer, font);
+        console.log(`[NodeAdapter] Extracted internal name: "${fontFamilyName}"`);
+      }
+
+      console.log(`[NodeAdapter] Font will be registered as: "${fontFamilyName}"`);
       console.log(`[NodeAdapter] Creating mapping: ${font.idFont} → ${fontFamilyName}`);
 
       // Store the mapping for JSON transformation later
