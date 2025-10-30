@@ -42,6 +42,7 @@ export interface ICanvasEnvironmentAdapter {
   createCanvas(width: number, height: number): fabric.Canvas;
   loadFont(font: FontDefinition): Promise<void>;
   loadImage(url: string): Promise<any>;
+  rebuildFontCache?(): Promise<void>;
   exportCanvas(canvas: fabric.Canvas): Promise<RenderResult>;
   cleanup(): void;
 }
