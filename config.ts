@@ -62,7 +62,12 @@ const config: AppConfig = {
   processing: {
     timeoutMs: 10 * 60 * 1000, // 10 minutes
     enableProgress: true, // Enable progress tracking for long-running operations
-    tempDir: process.env.TEMP_DIR || '/tmp/canvas-fonts', // Temporary directory for font caching
+    // Platform-specific temp directory
+    tempDir: process.env.TEMP_DIR || (
+      process.platform === 'win32'
+        ? (process.env.TEMP || 'C:\\Temp') + '\\canvas-fonts'
+        : '/tmp/canvas-fonts'
+    ),
     maxConcurrentRenders: parseInt(process.env.MAX_CONCURRENT_RENDERS || '10', 10),
   },
 
